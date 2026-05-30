@@ -14,6 +14,7 @@ from ice_generator import generate_ice_chunks
 from geometry_utils import point_to_polygon_distance
 from pathfinding import (
     PathResult,
+    _build_open_mask,
     find_astar_path,
     find_dijkstra_path,
     find_safety_weighted_dijkstra_path,
@@ -28,15 +29,11 @@ from renderer import (
 
 Point = Tuple[float, float]
 
-TITLE = "\ubd81\uadf9 \ud574\ube59 \uc0dd\uc131\uae30"
-CAPTION = (
-    "\ud574\ube59 \ud658\uacbd\uc744 \uc0dd\uc131\ud558\uace0, \ubc14\ub2e4 \uc704\ub97c "
-    "\ud074\ub9ad\ud574 \uc120\ubc15\uc758 \ucd9c\ubc1c\uc810\uacfc \ub3c4\ucc29\uc810\uc744 \uc9c0\uc815\ud558\uace0, "
-    "\uacbd\ub85c \ud0d0\uc0c9 \uc54c\uace0\ub9ac\uc998\ubcc4 \uacb0\uacfc\ub97c \ube44\uad50\ud560 \uc218 \uc788\ub2e4."
-)
+TITLE = "북극 해빙 환경에서 선박 항로 생성 및 알고리즘 비교 웹앱"
+CAPTION = "해빙 환경을 생성하고, 바다 위를 클릭해 선박의 출발점과 도착점을 지정한 뒤, 경로 탐색 알고리즘별 결과를 비교할 수 있습니다."
 START_TEXT = "\ucd9c\ubc1c\uc810"
 GOAL_TEXT = "\ub3c4\ucc29\uc810"
-PATH_CELL_SIZE = 0.3
+PATH_CELL_SIZE = 0.5
 METERS_PER_UNIT = 100.0
 DEFAULT_EDGE_MARGIN = 0.1
 DEFAULT_OUTLINE_WIDTH = 0.5
@@ -106,19 +103,30 @@ def _inject_ppt_theme() -> None:
             --ppt-shadow: 0 12px 32px rgba(31, 58, 99, 0.10);
         }
         .stApp {
-            background: radial-gradient(circle at top right, rgba(75, 136, 255, 0.10), transparent 20%), linear-gradient(180deg, #f8fbff 0%, #ffffff 24%, #ffffff 100%);
+            background:
+                radial-gradient(circle at top right, rgba(75, 136, 255, 0.09), transparent 22%),
+                linear-gradient(180deg, #f3faff 0%, #fbfdff 38%, #f7fbff 100%);
             color: var(--ppt-text);
         }
         [data-testid="stAppViewContainer"] > .main { background: transparent; }
         .block-container { padding-top: 2.1rem; padding-bottom: 2.2rem; }
-        [data-testid="stSidebar"] { background: linear-gradient(180deg, #f8fbff 0%, #f1f7ff 100%); border-right: 1px solid var(--ppt-border); }
-        [data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
-        h1, h2, h3 { color: var(--ppt-navy) !important; letter-spacing: -0.02em; }
+        [data-testid="stSidebar"] {
+            background:
+                radial-gradient(circle at 18% 0%, rgba(198, 236, 255, 0.92), transparent 34%),
+                linear-gradient(180deg, #f4fcff 0%, #edf8fb 52%, #f8fbff 100%);
+            border-right: 1px solid #cfe3ee;
+            box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.72);
+        }
+        [data-testid="stSidebar"] .block-container { padding-top: 1.35rem; padding-bottom: 1.4rem; }
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0.52rem !important; }
+        [data-testid="stSidebar"] hr { display: none !important; margin: 0 !important; }
+        [data-testid="stSidebar"] [data-testid="stExpander"] { margin-bottom: 0.22rem; }
+        h1, h2, h3 { color: var(--ppt-navy) !important; letter-spacing: 0; }
         h1 { font-weight: 800 !important; }
         h2, h3 { font-weight: 760 !important; }
         .stCaption, .stMarkdown p, .stMarkdown li, .stText, label { color: var(--ppt-text); }
         .stCaption { color: var(--ppt-muted) !important; }
-        [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { font-size: 1.05rem !important; margin-top: 0.15rem; }
+        [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { font-size: 1.16rem !important; margin-top: 0.15rem; }
         [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] { border: 1px solid var(--ppt-border); border-radius: 22px; background: rgba(255, 255, 255, 0.86); box-shadow: var(--ppt-shadow); }
         [data-testid="stExpander"] details summary p { color: var(--ppt-navy) !important; font-weight: 650; }
         .stButton > button { border-radius: 999px; border: 1px solid var(--ppt-blue-mid); color: var(--ppt-navy); background: linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%); font-weight: 650; box-shadow: 0 8px 20px rgba(75, 136, 255, 0.10); }
@@ -145,7 +153,17 @@ def _inject_ppt_theme() -> None:
         .ppt-weight-pills { display: flex; gap: 0.55rem; margin-top: 0.9rem; flex-wrap: wrap; }
         .ppt-pill { padding: 0.45rem 0.9rem; border-radius: 999px; font-size: 0.84rem; font-weight: 700; border: 1px solid var(--ppt-blue-mid); color: var(--ppt-navy); background: #eff5ff; }
         .ppt-pill.active { color: white; border-color: var(--ppt-blue); background: linear-gradient(135deg, #4b88ff 0%, #3b6fdd 100%); box-shadow: 0 8px 18px rgba(75, 136, 255, 0.24); }
-        .ppt-comparison-title { margin-bottom: 0.9rem; }
+        .ppt-comparison-shell { position: relative; }
+        .ppt-comparison-toggle { position: absolute; opacity: 0; pointer-events: none; }
+        .ppt-comparison-header { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.9rem; }
+        .ppt-comparison-title { margin-bottom: 0; }
+        .ppt-comparison-expand, .ppt-comparison-close { display: inline-flex; align-items: center; justify-content: center; width: 2.2rem; height: 2.2rem; border-radius: 999px; border: 1px solid var(--ppt-border); background: #ffffff; color: var(--ppt-navy); font-weight: 800; cursor: pointer; box-shadow: 0 8px 18px rgba(31, 58, 99, 0.10); user-select: none; }
+        .ppt-comparison-expand:hover, .ppt-comparison-close:hover { color: var(--ppt-blue); border-color: var(--ppt-blue-mid); background: #f5f9ff; }
+        .ppt-comparison-close { display: none; position: fixed; top: 1.2rem; right: 1.2rem; z-index: 1000001; width: auto; min-width: 4.4rem; padding: 0 0.9rem; }
+        .ppt-comparison-toggle:checked + .ppt-comparison-card { position: fixed; inset: 1.4rem; z-index: 1000000; overflow: auto; padding: 1.45rem; background: #ffffff; }
+        .ppt-comparison-toggle:checked + .ppt-comparison-card .ppt-comparison-close { display: inline-flex; }
+        .ppt-comparison-toggle:checked + .ppt-comparison-card .ppt-comparison-scroll { overflow: auto; max-height: calc(100vh - 8rem); }
+        .ppt-comparison-toggle:checked + .ppt-comparison-card .ppt-comparison-table { min-width: 1180px; width: 100%; font-size: 1rem; }
         .ppt-comparison-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; padding-bottom: 0.35rem; }
         .ppt-comparison-scroll::-webkit-scrollbar { height: 8px; }
         .ppt-comparison-scroll::-webkit-scrollbar-thumb { background: #c7d6ec; border-radius: 999px; }
@@ -158,6 +176,76 @@ def _inject_ppt_theme() -> None:
         .ppt-comparison-table .best { color: var(--ppt-green); font-weight: 760; }
         .ppt-comparison-table .warn { color: var(--ppt-red); font-weight: 760; }
         .ppt-comparison-table .emph { color: var(--ppt-blue); font-weight: 760; }
+        .asv-main-divider {
+            width: 1px;
+            min-height: 44rem;
+            margin: 0.25rem auto 0;
+            background: linear-gradient(180deg, transparent 0%, #dbe7f1 8%, #dbe7f1 92%, transparent 100%);
+        }
+        .asv-right-divider {
+            width: 1px;
+            min-height: 15.5rem;
+            margin: 0.35rem auto 0;
+            background: linear-gradient(180deg, transparent 0%, #dbe7f1 12%, #dbe7f1 88%, transparent 100%);
+        }
+        .asv-section-divider {
+            height: 1px;
+            width: 100%;
+            margin: 1.15rem 0 0.85rem;
+            background: linear-gradient(90deg, transparent 0%, #dbe7f1 8%, #dbe7f1 92%, transparent 100%);
+        }
+        .asv-hero {
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #cfe5f2;
+            border-radius: 24px;
+            padding: 1.45rem 1.65rem 1.5rem;
+            margin: 0 0 1.55rem 0;
+            background:
+                radial-gradient(circle at 88% 18%, rgba(112, 197, 231, 0.32), transparent 34%),
+                linear-gradient(135deg, #ffffff 0%, #eef9ff 48%, #dff4fb 100%);
+            box-shadow: 0 16px 38px rgba(31, 58, 99, 0.11);
+        }
+        .asv-hero::after {
+            content: "";
+            position: absolute;
+            right: -4rem;
+            top: -5rem;
+            width: 16rem;
+            height: 16rem;
+            border-radius: 999px;
+            background: rgba(75, 136, 255, 0.10);
+        }
+        .asv-hero-badge {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid #a8d8ef;
+            border-radius: 999px;
+            padding: 0.32rem 0.72rem;
+            color: #1670a5;
+            background: rgba(255, 255, 255, 0.68);
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 0.72rem;
+        }
+        .asv-hero-title {
+            position: relative;
+            z-index: 1;
+            color: var(--ppt-navy) !important;
+            font-size: 2.18rem;
+            line-height: 1.08;
+            font-weight: 850;
+            margin: 0 0 0.72rem 0;
+        }
+        .asv-hero-caption {
+            position: relative;
+            z-index: 1;
+            color: #61758e;
+            font-size: 0.98rem;
+            margin: 0;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -289,7 +377,22 @@ def _render_comparison_table_html(comparison_rows: List[dict]) -> str:
             cells.append(f'<td class="{class_name}">{html.escape(text)}</td>')
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
 
-    return ('<div class="ppt-comparison-card">' '<div class="ppt-comparison-title">알고리즘 성능 비교표</div>' '<div class="ppt-comparison-scroll"><table class="ppt-comparison-table">' f"<thead><tr>{head_html}</tr></thead>" f"<tbody>{''.join(body_rows)}</tbody>" '</table></div>' '</div>')
+    return (
+        '<div class="ppt-comparison-shell">'
+        '<input class="ppt-comparison-toggle" id="ppt-comparison-fullscreen" type="checkbox">'
+        '<div class="ppt-comparison-card">'
+        '<div class="ppt-comparison-header">'
+        '<div class="ppt-comparison-title">알고리즘별 수치 비교표</div>'
+        '<label class="ppt-comparison-expand" for="ppt-comparison-fullscreen" title="전체화면으로 보기">⛶</label>'
+        '</div>'
+        '<label class="ppt-comparison-close" for="ppt-comparison-fullscreen">닫기</label>'
+        '<div class="ppt-comparison-scroll"><table class="ppt-comparison-table">'
+        f"<thead><tr>{head_html}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        '</table></div>'
+        '</div>'
+        '</div>'
+    )
 def _nearest_ice_distance(point: Point, visible_polygons) -> float:
     if not visible_polygons:
         return float("inf")
@@ -467,6 +570,7 @@ def _run_path_algorithm(
     cell_size: float,
     safety_radius: float,
     progress_callback,
+    open_mask: Optional[np.ndarray] = None,
 ) -> Optional[PathResult]:
     common_kwargs = {
         "width": width,
@@ -476,6 +580,7 @@ def _run_path_algorithm(
         "visible_polygons": visible_polygons,
         "cell_size": cell_size,
         "progress_callback": progress_callback,
+        "open_mask": open_mask,
     }
 
     if algorithm_key == "safe_dijkstra":
@@ -540,6 +645,8 @@ def _ensure_state() -> None:
         "comparison_signature": None,
         "comparison_results": None,
         "comparison_errors": None,
+        "previous_path_snapshot": None,
+        "previous_comparison_snapshot": None,
         "score_weight_detour": 30,
         "score_weight_safety": 30,
         "score_weight_time": 15,
@@ -553,13 +660,32 @@ def _ensure_state() -> None:
             st.session_state[key] = value
 
 
-def _clear_points() -> None:
-    st.session_state.selection_target = START_TEXT
-    st.session_state.start_point = None
-    st.session_state.goal_point = None
-    st.session_state.last_processed_click = None
-    st.session_state.click_feedback = None
-    st.session_state.pending_selection_target = START_TEXT
+def _remember_current_results() -> None:
+    if (
+        st.session_state.path_result is not None
+        and st.session_state.path_result_signature is not None
+        and st.session_state.path_algorithm in PATH_ALGORITHMS
+    ):
+        st.session_state.previous_path_snapshot = {
+            "algorithm_key": st.session_state.path_algorithm,
+            "signature": st.session_state.path_result_signature,
+            "result": st.session_state.path_result,
+            "duration": st.session_state.last_path_duration,
+            "start_point": st.session_state.start_point,
+            "goal_point": st.session_state.goal_point,
+        }
+
+    if st.session_state.comparison_results:
+        st.session_state.previous_comparison_snapshot = {
+            "signature": st.session_state.comparison_signature,
+            "results": st.session_state.comparison_results,
+            "errors": st.session_state.comparison_errors,
+            "start_point": st.session_state.start_point,
+            "goal_point": st.session_state.goal_point,
+        }
+
+
+def _clear_current_path_results() -> None:
     st.session_state.path_request_signature = None
     st.session_state.path_result = None
     st.session_state.path_result_signature = None
@@ -569,6 +695,48 @@ def _clear_points() -> None:
     st.session_state.comparison_signature = None
     st.session_state.comparison_results = None
     st.session_state.comparison_errors = None
+
+
+def _restore_previous_result_snapshot() -> None:
+    snapshot = st.session_state.previous_path_snapshot
+    if not snapshot:
+        return
+
+    st.session_state.start_point = snapshot.get("start_point")
+    st.session_state.goal_point = snapshot.get("goal_point")
+    st.session_state.path_algorithm = snapshot.get("algorithm_key")
+    st.session_state.path_request_signature = snapshot.get("signature")
+    st.session_state.path_result = snapshot.get("result")
+    st.session_state.path_result_signature = snapshot.get("signature")
+    st.session_state.path_error_message = None
+    st.session_state.last_path_duration = snapshot.get("duration")
+
+    previous_comparison = st.session_state.previous_comparison_snapshot
+    snapshot_signature = snapshot.get("signature")
+    previous_base_signature = snapshot_signature[:-1] if snapshot_signature else None
+    if previous_comparison and previous_comparison.get("signature") == previous_base_signature:
+        st.session_state.comparison_signature = previous_comparison.get("signature")
+        st.session_state.comparison_results = previous_comparison.get("results")
+        st.session_state.comparison_errors = previous_comparison.get("errors") or {}
+    else:
+        algorithm_key = snapshot.get("algorithm_key")
+        st.session_state.comparison_signature = previous_base_signature
+        st.session_state.comparison_results = {
+            algorithm_key: {
+                "result": snapshot.get("result"),
+                "duration": snapshot.get("duration"),
+            }
+        } if algorithm_key else {}
+        st.session_state.comparison_errors = {}
+
+def _clear_points() -> None:
+    st.session_state.selection_target = START_TEXT
+    st.session_state.start_point = None
+    st.session_state.goal_point = None
+    st.session_state.last_processed_click = None
+    st.session_state.click_feedback = None
+    st.session_state.pending_selection_target = START_TEXT
+    _clear_current_path_results()
     st.session_state.image_click_key_index += 1
 
 
@@ -610,15 +778,7 @@ def _validate_saved_points(
 
     if removed_labels:
         st.session_state.last_processed_click = None
-        st.session_state.path_request_signature = None
-        st.session_state.path_result = None
-        st.session_state.path_result_signature = None
-        st.session_state.path_error_message = None
-        st.session_state.last_path_duration = None
-        st.session_state.path_algorithm = None
-        st.session_state.comparison_signature = None
-        st.session_state.comparison_results = None
-        st.session_state.comparison_errors = None
+        _clear_current_path_results()
         return ", ".join(removed_labels)
 
     return None
@@ -667,71 +827,99 @@ if st.session_state.pending_selection_target is not None:
     st.session_state.selection_target_widget = st.session_state.pending_selection_target
     st.session_state.pending_selection_target = None
 
-st.title(TITLE)
-st.caption(CAPTION)
+st.markdown(
+    f"""
+    <section class="asv-hero">
+        <div class="asv-hero-badge">Arctic Ice Route Generation & Algorithm Comparison Web App</div>
+        <h1 class="asv-hero-title">{TITLE}</h1>
+        <p class="asv-hero-caption">{CAPTION}</p>
+    </section>
+    """,
+    unsafe_allow_html=True,
+)
 path_timer_placeholder = st.empty()
 
 with st.sidebar:
-    st.header("파라미터 설정")
+    st.header("환경 설정")
 
-    seed = st.number_input("랜덤 배치", min_value=0, value=42, step=1)
-    ice_count = st.slider("얼음 개수", min_value=20, max_value=220, value=85, step=5)
+    seed = st.number_input("해빙 랜덤 배치", min_value=0, value=42, step=1)
 
-    min_diameter_m = st.slider("최소 직경 (m)", min_value=40, max_value=300, value=80, step=10)
-    max_diameter_m = st.slider("최대 직경 (m)", min_value=80, max_value=500, value=180, step=10)
+    with st.expander("해빙 세부 설정", expanded=False):
+        ice_count = st.slider("얼음 개수", min_value=20, max_value=220, value=85, step=5)
+        min_diameter_m = st.slider("최소 직경 (m)", min_value=40, max_value=300, value=80, step=10)
+        max_diameter_m = st.slider("최대 직경 (m)", min_value=80, max_value=500, value=180, step=10)
+        min_vertices = st.slider(
+            "최소 꼭짓점 수", min_value=6, max_value=12, value=8, step=1
+        )
+        max_vertices = st.slider(
+            "최대 꼭짓점 수", min_value=8, max_value=24, value=14, step=1
+        )
+        min_gap_m = st.slider("최소 간격 (m)", min_value=0, max_value=150, value=10, step=5)
+        show_grid = st.checkbox("격자 표시", value=False, help="체크하면 30×30 격자를 표시합니다.")
+
     min_diameter = _meters_to_units(min_diameter_m)
     max_diameter = _meters_to_units(max_diameter_m)
-
-    min_vertices = st.slider(
-        "최소 꼭짓점 수", min_value=6, max_value=12, value=8, step=1
-    )
-    max_vertices = st.slider(
-        "최대 꼭짓점 수", min_value=8, max_value=24, value=14, step=1
-    )
     edge_margin = DEFAULT_EDGE_MARGIN
-    min_gap_m = st.slider("최소 간격 (m)", min_value=0, max_value=150, value=10, step=5)
     min_gap = _meters_to_units(min_gap_m)
     outline_width = DEFAULT_OUTLINE_WIDTH
-    show_grid = st.checkbox("격자 표시", value=False, help="체크하면 30×30 격자를 표시한다.")
 
-    st.divider()
-    st.header("선박 안전 설정")
-    ship_safety_radius_m = st.slider(
-        "선박 안전 반경 (m)",
-        min_value=10,
-        max_value=200,
-        value=100,
-        step=10,
-    )
+    with st.expander("선박 안전 반경 설정", expanded=False):
+        ship_safety_radius_m = st.slider(
+            "선박 안전 반경 (m)",
+            min_value=10,
+            max_value=200,
+            value=100,
+            step=10,
+        )
+        risk_threshold_m = int(round(ship_safety_radius_m * 0.5))
+        st.caption(
+            f"최소 해빙 거리가 `{risk_threshold_m} m` 미만이면 `위험`, "
+            f"`{risk_threshold_m}~{ship_safety_radius_m} m` 구간이면 `주의`, "
+            f"`{ship_safety_radius_m} m` 이상이면 `안전`으로 평가합니다."
+        )
+        st.markdown(_render_safety_radius_preview_card(ship_safety_radius_m), unsafe_allow_html=True)
     ship_safety_radius = _meters_to_units(ship_safety_radius_m)
-    risk_threshold_m = int(round(ship_safety_radius_m * 0.5))
-    st.caption(
-        f"최소 해빙 거리가 `{risk_threshold_m} m` 미만이면 `위험`, "
-        f"`{risk_threshold_m}~{ship_safety_radius_m} m` 구간이면 `주의`, "
-        f"`{ship_safety_radius_m} m` 이상이면 `안전`으로 평가한다."
-    )
-    st.markdown(_render_safety_radius_preview_card(ship_safety_radius_m), unsafe_allow_html=True)
 
-    st.divider()
-    st.header("평가 가중치 설정")
-    preset_cols = st.columns(3)
-    for column, preset_name in zip(preset_cols, ("안전 중심", "속도 중심", "균형")):
-        button_type = "primary" if st.session_state.weight_preset == preset_name else "secondary"
-        if column.button(preset_name, key=f"weight_preset_button_{preset_name}", type=button_type, use_container_width=True):
-            preset_values = WEIGHT_PRESETS[preset_name]
-            st.session_state.score_weight_detour = preset_values["detour"]
-            st.session_state.score_weight_safety = preset_values["safety"]
-            st.session_state.score_weight_time = preset_values["time"]
-            st.session_state.score_weight_nodes = preset_values["nodes"]
-            st.session_state.score_weight_turn = preset_values["turn"]
-            st.session_state.weight_preset = preset_name
-            st.rerun()
+    with st.expander("평가 가중치 설정", expanded=False):
+        preset_cols = st.columns(3)
+        for column, preset_name in zip(preset_cols, ("안전 중심", "속도 중심", "균형")):
+            button_type = "primary" if st.session_state.weight_preset == preset_name else "secondary"
+            if column.button(preset_name, key=f"weight_preset_button_{preset_name}", type=button_type, use_container_width=True):
+                preset_values = WEIGHT_PRESETS[preset_name]
+                st.session_state.score_weight_detour = preset_values["detour"]
+                st.session_state.score_weight_safety = preset_values["safety"]
+                st.session_state.score_weight_time = preset_values["time"]
+                st.session_state.score_weight_nodes = preset_values["nodes"]
+                st.session_state.score_weight_turn = preset_values["turn"]
+                st.session_state.weight_preset = preset_name
+                st.rerun()
 
-    score_weight_detour = st.slider("우회율 가중치", min_value=0, max_value=50, step=5, key="score_weight_detour")
-    score_weight_safety = st.slider("안전성 가중치", min_value=0, max_value=50, step=5, key="score_weight_safety")
-    score_weight_time = st.slider("계산 시간 가중치", min_value=0, max_value=50, step=5, key="score_weight_time")
-    score_weight_nodes = st.slider("방문 노드 가중치", min_value=0, max_value=50, step=5, key="score_weight_nodes")
-    score_weight_turn = st.slider("굴곡 정도 가중치", min_value=0, max_value=50, step=5, key="score_weight_turn")
+        score_weight_detour = st.slider("우회율 가중치", min_value=0, max_value=50, step=5, key="score_weight_detour")
+        score_weight_safety = st.slider("안전성 가중치", min_value=0, max_value=50, step=5, key="score_weight_safety")
+        score_weight_time = st.slider("계산 시간 가중치", min_value=0, max_value=50, step=5, key="score_weight_time")
+        score_weight_nodes = st.slider("방문 노드 가중치", min_value=0, max_value=50, step=5, key="score_weight_nodes")
+        score_weight_turn = st.slider("굴곡 정도 가중치", min_value=0, max_value=50, step=5, key="score_weight_turn")
+        matched_preset = next((
+            name
+            for name, values in WEIGHT_PRESETS.items()
+            if values["detour"] == score_weight_detour
+            and values["safety"] == score_weight_safety
+            and values["time"] == score_weight_time
+            and values["nodes"] == score_weight_nodes
+            and values["turn"] == score_weight_turn
+        ), None)
+        st.session_state.weight_preset = matched_preset or "사용자 설정"
+        st.caption("종합 점수는 위 가중치의 비율로 자동 정규화해 계산합니다.")
+        st.markdown(
+            _render_weight_preview_card(
+                detour_weight=score_weight_detour,
+                safety_weight=score_weight_safety,
+                time_weight=score_weight_time,
+                nodes_weight=score_weight_nodes,
+                turn_weight=score_weight_turn,
+            ),
+            unsafe_allow_html=True,
+        )
     score_weights = {
         "detour": float(score_weight_detour),
         "safety": float(score_weight_safety),
@@ -739,32 +927,7 @@ with st.sidebar:
         "nodes": float(score_weight_nodes),
         "turn": float(score_weight_turn),
     }
-    matched_preset = next((
-        name
-        for name, values in WEIGHT_PRESETS.items()
-        if values["detour"] == score_weight_detour
-        and values["safety"] == score_weight_safety
-        and values["time"] == score_weight_time
-        and values["nodes"] == score_weight_nodes
-        and values["turn"] == score_weight_turn
-    ), None)
-    st.session_state.weight_preset = matched_preset or "사용자 설정"
-    st.caption(
-        "종합 점수는 위 가중치의 비율로 자동 정규화해 계산한다."
-    )
-    st.markdown(
-        _render_weight_preview_card(
-            detour_weight=score_weight_detour,
-            safety_weight=score_weight_safety,
-            time_weight=score_weight_time,
-            nodes_weight=score_weight_nodes,
-            turn_weight=score_weight_turn,
-        ),
-        unsafe_allow_html=True,
-    )
 
-
-    st.divider()
     st.header("출발점/도착점 지정")
     st.radio(
         "지금 클릭해서 지정할 점",
@@ -777,7 +940,7 @@ with st.sidebar:
         _clear_points()
         st.rerun()
 
-    st.caption("지도 이미지를 직접 클릭")
+    st.caption("지도 이미지를 직접 클릭하세요")
 
 
 random.seed(int(seed))
@@ -835,8 +998,16 @@ if (
     if st.session_state.path_result_signature != path_signature:
         algorithm_button_label, algorithm_display_name, algorithm_finder = PATH_ALGORITHMS[selected_algorithm_key]
         started_at = time.perf_counter()
+        path_timer_placeholder.info("경로 계산용 격자를 생성하는 중입니다... `0.00`초")
+        single_open_mask = _build_open_mask(
+            sea_width,
+            sea_height,
+            PATH_CELL_SIZE,
+            visible_polygons,
+            PATH_CELL_SIZE * 0.42,
+        )
         path_timer_placeholder.info(
-            f"{algorithm_display_name} \uacbd\ub85c \uacc4\uc0b0 \uc911... `0.00`\ucd08"
+            f"{algorithm_display_name} 경로 계산 중... `{time.perf_counter() - started_at:.2f}`초"
         )
 
         def _update_path_progress(visited_nodes: int) -> None:
@@ -857,6 +1028,7 @@ if (
             cell_size=PATH_CELL_SIZE,
             safety_radius=ship_safety_radius,
             progress_callback=_update_path_progress,
+            open_mask=single_open_mask,
         )
         elapsed_seconds = time.perf_counter() - started_at
 
@@ -875,8 +1047,8 @@ if (
 
         if computed_result is None:
             st.session_state.path_error_message = (
-                f"{algorithm_display_name} \ud0d0\uc0c9\uc73c\ub85c \ub3c4\ucc29 \uac00\ub2a5\ud55c \uacbd\ub85c\ub97c \ucc3e\uc9c0 \ubabb\ud588\ub2e4. "
-                "\ucd9c\ubc1c\uc810/\ub3c4\ucc29\uc810\uc744 \ub2e4\uc2dc \uc9c0\uc815\ud558\uac70\ub098 \ud574\ube59 \uc870\uac74\uc744 \ubc14\uafd4\ubd10."
+                f"{algorithm_display_name} 탐색으로 도착 가능한 경로를 찾지 못했습니다. "
+                "출발점/도착점을 다시 지정하거나 해빙 조건을 변경해주세요."
             )
             st.session_state.comparison_errors[selected_algorithm_key] = st.session_state.path_error_message
             path_timer_placeholder.warning(
@@ -919,10 +1091,10 @@ image_bytes = figure_to_png_bytes(figure)
 plt.close(figure)
 image = Image.open(BytesIO(image_bytes))
 
-left_col, right_col = st.columns([2.7, 1.0])
+left_col, main_divider_col, right_col = st.columns([1.45, 0.035, 1.15], gap="small")
 
 with left_col:
-    st.subheader("\ud574\ube59 \ubd84\ud3ec")
+    st.subheader("해빙 환경 지도")
 
     map_col_left, map_col_center, map_col_right = st.columns([1, 12, 1])
     with map_col_center:
@@ -951,42 +1123,28 @@ with left_col:
             )
 
             if sea_point is None:
-                st.session_state.click_feedback = "\ud574\uc5ed \ud14c\ub450\ub9ac \uc548\ucabd\uc744 \ud074\ub9ad\ud574\uc918."
+                st.session_state.click_feedback = "해역 테두리 안쪽을 클릭해주세요."
             elif is_open_water_point(sea_point, sea_width, sea_height, visible_polygons):
                 if st.session_state.selection_target == START_TEXT:
+                    _remember_current_results()
                     st.session_state.start_point = sea_point
                     st.session_state.pending_selection_target = GOAL_TEXT
-                    st.session_state.path_request_signature = None
-                    st.session_state.path_result = None
-                    st.session_state.path_result_signature = None
-                    st.session_state.path_error_message = None
-                    st.session_state.last_path_duration = None
-                    st.session_state.path_algorithm = None
-                    st.session_state.comparison_signature = None
-                    st.session_state.comparison_results = None
-                    st.session_state.comparison_errors = None
-                    st.session_state.click_feedback = f"{START_TEXT}\uc774 \uc9c0\uc815\ub418\uc5c8\ub2e4."
+                    _clear_current_path_results()
+                    st.session_state.click_feedback = f"{START_TEXT}이 지정되었습니다."
                 else:
+                    _remember_current_results()
                     st.session_state.goal_point = sea_point
-                    st.session_state.path_request_signature = None
-                    st.session_state.path_result = None
-                    st.session_state.path_result_signature = None
-                    st.session_state.path_error_message = None
-                    st.session_state.last_path_duration = None
-                    st.session_state.path_algorithm = None
-                    st.session_state.comparison_signature = None
-                    st.session_state.comparison_results = None
-                    st.session_state.comparison_errors = None
-                    st.session_state.click_feedback = f"{GOAL_TEXT}\uc774 \uc9c0\uc815\ub418\uc5c8\ub2e4."
+                    _clear_current_path_results()
+                    st.session_state.click_feedback = f"{GOAL_TEXT}이 지정되었습니다."
             else:
-                st.session_state.click_feedback = "\uc5bc\uc74c \uc704\ub294 \uc120\ud0dd\ud560 \uc218 \uc5c6\ub2e4. \ube48 \ubc14\ub2e4\ub97c \ud074\ub9ad\ud574\uc918."
+                st.session_state.click_feedback = "얼음 위는 선택할 수 없습니다. 빈 바다를 클릭해주세요."
 
             st.session_state.last_processed_click = click_id
             st.session_state.image_click_key_index += 1
             st.rerun()
 
     st.caption(
-        "\ube48 \ubc14\ub2e4\ub97c \ud074\ub9ad\ud558\uba74 \uc120\ud0dd\ud55c \uc810\uc774 \uc9c0\ub3c4\uc5d0 \ud45c\uc2dc\ub41c\ub2e4."
+        "빈 바다를 클릭하면 선택한 지점이 지도에 표시됩니다."
     )
 
     if (
@@ -997,7 +1155,7 @@ with left_col:
         st.divider()
         st.subheader("\uc54c\uace0\ub9ac\uc998\ubcc4 \uacbd\ub85c \uadf8\ub9bc \ube44\uad50")
         st.caption(
-            "\uc804\uccb4 \uc54c\uace0\ub9ac\uc998 \ube44\uad50 \uc2e4\ud589 \ud6c4 \uac01 \uc54c\uace0\ub9ac\uc998\uc774 \uc0dd\uc131\ud55c \uacbd\ub85c\ub97c \ud55c\ub208\uc5d0 \ube44\uad50\ud560 \uc218 \uc788\ub2e4."
+            "전체 알고리즘 비교 실행 후 각 알고리즘이 생성한 경로를 한눈에 비교할 수 있습니다."
         )
 
         preview_columns = st.columns(2)
@@ -1044,69 +1202,125 @@ with left_col:
 
             preview_index += 1
 
+    if (
+        base_path_signature is not None
+        and st.session_state.comparison_signature == base_path_signature
+        and st.session_state.comparison_results
+    ):
+        st.markdown('<div class="asv-section-divider"></div>', unsafe_allow_html=True)
+        st.subheader("알고리즘별 수치 비교표")
+
+        comparison_rows = []
+        for algorithm_key, (_, algorithm_display_name, _) in PATH_ALGORITHMS.items():
+            result_entry = st.session_state.comparison_results.get(algorithm_key)
+            if result_entry is None:
+                continue
+
+            comparison_rows.append(
+                _build_comparison_row(
+                    algorithm_name=algorithm_display_name,
+                    result=result_entry["result"],
+                    duration_seconds=result_entry["duration"],
+                    safety_radius=ship_safety_radius,
+                    total_grid_nodes=total_grid_nodes,
+                    score_weights=score_weights,
+                    visible_polygons=visible_polygons,
+                )
+            )
+
+        st.markdown(_render_comparison_table_html(comparison_rows), unsafe_allow_html=True)
+
+        scored_results = [
+            (
+                row["\uc54c\uace0\ub9ac\uc998"],
+                float(row["\uc885\ud569 \uc810\uc218"].split()[0]),
+            )
+            for row in comparison_rows
+        ]
+        if scored_results:
+            best_name, best_score = max(scored_results, key=lambda item: item[1])
+            st.success(f"\ud604\uc7ac \ud3c9\uac00\uc2dd \uae30\uc900 \ucd5c\uace0 \uc810\uc218: `{best_name}` `{best_score:.1f} / 100`")
+
+        if st.session_state.comparison_errors:
+            for error_message in st.session_state.comparison_errors.values():
+                st.warning(error_message)
+
+        with st.expander("\uc885\ud569 \uc810\uc218 \ud3c9\uac00 \uae30\uc900"):
+            st.write(
+                f"\ud604\uc7ac \uac00\uc911\uce58: \uc6b0\ud68c\uc728 `{score_weight_detour}`, \uc548\uc804\uc131 `{score_weight_safety}`, "
+                f"\uacc4\uc0b0 \uc2dc\uac04 `{score_weight_time}`, \ubc29\ubb38 \ub178\ub4dc `{score_weight_nodes}`, "
+                f"\uad74\uace1 \uc815\ub3c4 `{score_weight_turn}`"
+            )
+            st.write(
+                "\uc885\ud569 \uc810\uc218\ub294 \uc0ac\uc774\ub4dc\ubc14\uc5d0\uc11c \uc870\uc808\ud55c \uac00\uc911\uce58\ub97c \ube44\uc728\ub85c \uc815\uaddc\ud654\ud558\uc5ec "
+                "우회율, 안전성, 계산 시간, 방문 노드 수, 굴곡 정도를 함께 반영한 값입니다."
+            )
+            st.write(
+                "\uc774 \uc810\uc218\ub294 \uc54c\uace0\ub9ac\uc998\uc774 \uc548\uc804\uac70\ub9ac\ub97c \uc9c1\uc811 \ucd5c\uc801\ud654\ud588\ub2e4\ub294 \ub73b\uc774 \uc544\ub2c8\ub77c, "
+                "같은 해빙 환경에서 생성된 경로를 동일한 기준으로 사후 평가한 값입니다."
+            )
+
+
+
+with main_divider_col:
+    st.markdown('<div class="asv-main-divider"></div>', unsafe_allow_html=True)
 with right_col:
-    st.subheader("\uc694\uc57d")
-    st.write(f"해역 크기: `{_format_distance(sea_width)} × {_format_distance(sea_height)}`")
-    st.write(f"\uc694\uccad\ud55c \uc5bc\uc74c \uac1c\uc218: `{ice_count}`")
-    st.write(f"\ubc30\uce58\ub41c \uc5bc\uc74c \uac1c\uc218: `{len(chunks)}`")
-    st.write(f"직경 범위: `{_format_distance_range(safe_min_diameter, safe_max_diameter)}`")
-    st.write(f"\uaf2d\uc9d3\uc810 \uc218 \ubc94\uc704: `{safe_min_vertices} ~ {safe_max_vertices}`")
-    st.write(f"최소 간격: `{_format_distance(min_gap)}`")
+    summary_col, right_inner_divider_col, ship_col = st.columns([1.08, 0.035, 1.0], gap="medium")
 
-    if len(chunks) < ice_count:
-        st.warning(
-            "\ud574\uc5ed\uc774 \ub108\ubb34 \ubcf5\uc7a1\ud574\uc11c \uc694\uccad\ud55c \uc5bc\uc74c \uac1c\uc218\ub97c \ubaa8\ub450 \ubc30\uce58\ud558\uc9c0 \ubabb\ud588\ub2e4."
-        )
-    else:
-        st.success("\uc5bc\uc74c \uc870\uac01\uc774 \uc815\uc0c1\uc801\uc73c\ub85c \ubc30\uce58\ub418\uc5c8\ub2e4.")
+    with summary_col:
+        st.subheader("해빙 설정 요약")
+        st.write(f"해역 크기: `{_format_distance(sea_width)} × {_format_distance(sea_height)}`")
+        st.write(f"배치 얼음: `{len(chunks)} / {ice_count}개`")
+        st.write(f"직경 범위: `{_format_distance_range(safe_min_diameter, safe_max_diameter)}`")
+        st.write(f"꼭짓점 수: `{safe_min_vertices} ~ {safe_max_vertices}`")
+        st.write(f"최소 간격: `{_format_distance(min_gap)}`")
 
-    st.divider()
-    st.subheader("\uc120\ubc15 \uc704\uce58")
-
-    if removed_message is not None:
-        st.warning(
-            f"\ud574\ube59 \ud658\uacbd\uc774 \ubc14\ub00c\uc5b4\uc11c `{removed_message}`\uc774 \uc790\ub3d9\uc73c\ub85c \ucd08\uae30\ud654\ub418\uc5c8\ub2e4."
-        )
-
-    if st.session_state.click_feedback is not None:
-        if "\uc5bc\uc74c \uc704" in st.session_state.click_feedback:
-            st.warning(st.session_state.click_feedback)
+        if len(chunks) < ice_count:
+            st.warning("해역이 너무 복잡해서 요청한 얼음 개수를 모두 배치하지 못했습니다.")
         else:
-            st.success(st.session_state.click_feedback)
+            st.success("얼음 조각이 정상적으로 배치되었습니다.")
 
-    if st.session_state.start_point is not None:
-        st.write(
-            f"{START_TEXT}: `{_format_coordinate(st.session_state.start_point)}`"
-        )
-    else:
-        st.write(f"{START_TEXT}: \uc544\uc9c1 \uc120\ud0dd\ub418\uc9c0 \uc54a\uc74c")
 
-    if st.session_state.goal_point is not None:
-        st.write(
-            f"{GOAL_TEXT}: `{_format_coordinate(st.session_state.goal_point)}`"
-        )
-    else:
-        st.write(f"{GOAL_TEXT}: \uc544\uc9c1 \uc120\ud0dd\ub418\uc9c0 \uc54a\uc74c")
+    with right_inner_divider_col:
+        st.markdown('<div class="asv-right-divider"></div>', unsafe_allow_html=True)
 
-    if st.session_state.start_point is None:
-        st.info(
-            "\uba3c\uc800 \ube48 \ubc14\ub2e4\ub97c \ud074\ub9ad\ud574\uc11c \ucd9c\ubc1c\uc810\uc744 \uc9c0\uc815\ud558\uba74 \ub41c\ub2e4."
-        )
-    elif st.session_state.goal_point is None:
-        st.info(
-            "\uc774\uc81c \ube48 \ubc14\ub2e4\ub97c \ud55c \ubc88 \ub354 \ud074\ub9ad\ud574\uc11c \ub3c4\ucc29\uc810\uc744 \uc9c0\uc815\ud558\uba74 \ub41c\ub2e4."
-        )
-    else:
-        st.success("\ucd9c\ubc1c\uc810\uacfc \ub3c4\ucc29\uc810\uc774 \ubaa8\ub450 \uc900\ube44\ub418\uc5c8\ub2e4.")
+    with ship_col:
+        st.subheader("선박 위치 지정")
 
-    st.divider()
-    st.subheader("\uacbd\ub85c \uacb0\uacfc")
+        if removed_message is not None:
+            st.warning(f"해빙 환경이 변경되어 `{removed_message}`이 자동으로 초기화되었습니다.")
+
+        if st.session_state.click_feedback is not None:
+            if "얼음 위" in st.session_state.click_feedback:
+                st.warning(st.session_state.click_feedback)
+            else:
+                st.success(st.session_state.click_feedback)
+
+        if st.session_state.start_point is not None:
+            st.write(f"{START_TEXT}: `{_format_coordinate(st.session_state.start_point)}`")
+        else:
+            st.write(f"{START_TEXT}: 아직 선택되지 않았습니다")
+
+        if st.session_state.goal_point is not None:
+            st.write(f"{GOAL_TEXT}: `{_format_coordinate(st.session_state.goal_point)}`")
+        else:
+            st.write(f"{GOAL_TEXT}: 아직 선택되지 않았습니다")
+
+        if st.session_state.start_point is None:
+            st.info("먼저 빈 바다를 클릭해서 출발점을 지정해주세요.")
+        elif st.session_state.goal_point is None:
+            st.info("이제 빈 바다를 한 번 더 클릭해서 도착점을 지정해주세요.")
+        else:
+            st.success("출발점과 도착점이 모두 준비되었습니다.")
+
+    st.markdown('<div class="asv-section-divider"></div>', unsafe_allow_html=True)
+    st.subheader("알고리즘 실행")
 
     for algorithm_key, (button_label, _, _) in PATH_ALGORITHMS.items():
         if st.button(button_label, use_container_width=True):
             if base_path_signature is None:
                 st.warning(
-                    "\uba3c\uc800 \ucd9c\ubc1c\uc810\uacfc \ub3c4\ucc29\uc810\uc744 \ubaa8\ub450 \uc9c0\uc815\ud574\uc918."
+                    "먼저 출발점과 도착점을 모두 지정해주세요."
                 )
             else:
                 cached_entry = None
@@ -1138,7 +1352,7 @@ with right_col:
         and st.session_state.comparison_signature == base_path_signature
         and st.session_state.comparison_results
     ):
-        st.caption("\uc774\ubbf8 \uacc4\uc0b0\ub41c \uacb0\uacfc\ub294 \ub2e4\uc2dc \uacc4\uc0b0\ud558\uc9c0 \uc54a\uace0 \ubc14\ub85c \ubd88\ub7ec\uc62c \uc218 \uc788\ub2e4.")
+        st.caption("이미 계산된 결과는 다시 계산하지 않고 바로 불러올 수 있습니다.")
         with st.expander("\uacc4\uc0b0\ub41c \uacb0\uacfc \ubc14\ub85c \ubcf4\uae30", expanded=False):
             for algorithm_key, (_, algorithm_display_name, _) in PATH_ALGORITHMS.items():
                 cached_entry = st.session_state.comparison_results.get(algorithm_key)
@@ -1162,11 +1376,25 @@ with right_col:
     if st.button("\uc804\uccb4 \uc54c\uace0\ub9ac\uc998 \ube44\uad50 \uc2e4\ud589", use_container_width=True):
         if base_path_signature is None:
             st.warning(
-                "\uba3c\uc800 \ucd9c\ubc1c\uc810\uacfc \ub3c4\ucc29\uc810\uc744 \ubaa8\ub450 \uc9c0\uc815\ud574\uc918."
+                "먼저 출발점과 도착점을 모두 지정해주세요."
             )
         else:
             comparison_results = {}
             comparison_errors = {}
+
+            path_timer_placeholder.info("4개 알고리즘 비교용 공통 격자를 생성하는 중입니다... `0.00`초")
+            comparison_started_at = time.perf_counter()
+            comparison_open_mask = _build_open_mask(
+                sea_width,
+                sea_height,
+                PATH_CELL_SIZE,
+                visible_polygons,
+                PATH_CELL_SIZE * 0.42,
+            )
+
+            path_timer_placeholder.info(
+                f"공통 격자 생성 완료  |  소요 시간 `{time.perf_counter() - comparison_started_at:.2f}`초"
+            )
 
             for algorithm_key, (_, algorithm_display_name, algorithm_finder) in PATH_ALGORITHMS.items():
                 started_at = time.perf_counter()
@@ -1192,12 +1420,13 @@ with right_col:
                     cell_size=PATH_CELL_SIZE,
                     safety_radius=ship_safety_radius,
                     progress_callback=_update_compare_progress,
+                    open_mask=comparison_open_mask,
                 )
                 elapsed_seconds = time.perf_counter() - started_at
 
                 if computed_result is None:
                     comparison_errors[algorithm_key] = (
-                        f"{algorithm_display_name} \ud0d0\uc0c9\uc73c\ub85c \uacbd\ub85c\ub97c \ucc3e\uc9c0 \ubabb\ud588\ub2e4."
+                        f"{algorithm_display_name} 탐색으로 경로를 찾지 못했습니다."
                     )
                 else:
                     comparison_results[algorithm_key] = {
@@ -1232,23 +1461,29 @@ with right_col:
                 st.session_state.path_result = None
                 st.session_state.path_result_signature = None
                 st.session_state.last_path_duration = None
-                st.session_state.path_error_message = "\ubaa8\ub4e0 \uc54c\uace0\ub9ac\uc998\uc774 \uacbd\ub85c\ub97c \ucc3e\uc9c0 \ubabb\ud588\ub2e4."
+                st.session_state.path_error_message = "모든 알고리즘이 경로를 찾지 못했습니다."
 
             st.rerun()
 
+    has_current_path_result = (
+        path_signature is not None
+        and st.session_state.path_request_signature == path_signature
+        and path_result is not None
+    )
+
     if st.session_state.start_point is None or st.session_state.goal_point is None:
         st.info(
-            "\ucd9c\ubc1c\uc810\uacfc \ub3c4\ucc29\uc810\uc744 \ubaa8\ub450 \uc9c0\uc815\ud55c \ub4a4 \uc6d0\ud558\ub294 \uc54c\uace0\ub9ac\uc998 \ubc84\ud2bc\uc744 \ub204\ub974\uba74 \uacbd\ub85c\ub97c \uacc4\uc0b0\ud55c\ub2e4."
+            "출발점과 도착점을 모두 지정한 뒤 원하는 알고리즘 버튼을 누르면 경로를 계산합니다."
         )
     elif path_signature is None or st.session_state.path_request_signature != path_signature:
         st.info(
-            "\uc9c0\uae08 \uc870\uac74\uc5d0\uc11c \uacbd\ub85c\ub97c \ubcf4\ub824\uba74 `Dijkstra`, `A*`, `Theta*` \uc911 \ud558\ub098\ub97c \uc2e4\ud589\ud558\uba74 \ub41c\ub2e4."
+            "현재 조건에서 경로를 확인하려면 `Dijkstra`, `A*`, `Theta*` 중 하나를 실행해주세요."
         )
     elif path_result is None:
         st.warning(path_error_message)
     else:
         _, algorithm_display_name, _ = PATH_ALGORITHMS[st.session_state.path_algorithm]
-        st.success(f"{algorithm_display_name} \uae30\ubc18 \uacbd\ub85c\uac00 \uc0dd\uc131\ub418\uc5c8\ub2e4.")
+        st.success(f"{algorithm_display_name} 기반 경로가 생성되었습니다.")
         st.write(f"경로 길이: `{_format_distance(path_result.distance)}`")
         st.write(f"직선 거리: `{_format_distance(path_result.direct_distance)}`")
         st.write(f"\uc6b0\ud68c\uc728(\uacbd\ub85c/\uc9c1\uc120): `{path_result.detour_ratio:.2f}`")
@@ -1289,29 +1524,8 @@ with right_col:
         and st.session_state.comparison_signature == base_path_signature
         and st.session_state.comparison_results
     ):
-        st.divider()
-        st.subheader("\uc54c\uace0\ub9ac\uc998\ubcc4 \ube44\uad50\ud45c")
-
-        comparison_rows = []
-        for algorithm_key, (_, algorithm_display_name, _) in PATH_ALGORITHMS.items():
-            result_entry = st.session_state.comparison_results.get(algorithm_key)
-            if result_entry is None:
-                continue
-
-            comparison_rows.append(
-                _build_comparison_row(
-                    algorithm_name=algorithm_display_name,
-                    result=result_entry["result"],
-                    duration_seconds=result_entry["duration"],
-                    safety_radius=ship_safety_radius,
-                    total_grid_nodes=total_grid_nodes,
-                    score_weights=score_weights,
-                    visible_polygons=visible_polygons,
-                )
-            )
-
-        st.markdown(_render_comparison_table_html(comparison_rows), unsafe_allow_html=True)
-
+        st.markdown('<div class="asv-section-divider"></div>', unsafe_allow_html=True)
+        st.subheader("안전거리 가중 전후 비교")
         dijkstra_entry = st.session_state.comparison_results.get("dijkstra")
         safe_dijkstra_entry = st.session_state.comparison_results.get("safe_dijkstra")
         if dijkstra_entry is not None and safe_dijkstra_entry is not None:
@@ -1329,44 +1543,42 @@ with right_col:
                 ship_safety_radius,
             )
 
-            st.subheader("\uc548\uc804\uac00\uc911 \uc801\uc6a9 \uc804\ud6c4 \ube44\uad50")
-            st.write(f"Dijkstra \ucd5c\uc18c \ud574\ube59 \uac70\ub9ac: `{dijkstra_result.min_clearance:.2f}`")
+            st.write(f"Dijkstra 최소 해빙 거리: `{_units_to_meters(dijkstra_result.min_clearance):.0f} m`")
             st.write(
-                f"Safety-Weighted Dijkstra \ucd5c\uc18c \ud574\ube59 \uac70\ub9ac: `{safe_dijkstra_result.min_clearance:.2f}`"
+                f"Safety-Weighted Dijkstra 최소 해빙 거리: `{_units_to_meters(safe_dijkstra_result.min_clearance):.0f} m`"
             )
-            st.write(f"\uc548\uc804\uac70\ub9ac \uac1c\uc120\ub7c9: `{clearance_delta:+.2f}`")
-            st.write(f"\uacbd\ub85c \uae38\uc774 \uc99d\uac00\ub7c9: `{length_delta:+.2f}`")
-            st.write(f"\uc704\ud5d8 \ud45c\uc2dc \uc9c0\uc810 \ubcc0\ud654: `{hazard_delta:+d}`")
+            st.write(f"안전거리 개선량: `{_units_to_meters(clearance_delta):+.0f} m`")
+            st.write(f"경로 길이 증가량: `{_units_to_meters(length_delta):+.0f} m`")
+            st.write(f"위험 표시 지점 변화: `{hazard_delta:+d}개`")
+        else:
+            st.info("Dijkstra와 Safety-Weighted Dijkstra 결과가 모두 있을 때 비교가 표시됩니다.")
 
-        scored_results = [
-            (
-                row["\uc54c\uace0\ub9ac\uc998"],
-                float(row["\uc885\ud569 \uc810\uc218"].split()[0]),
-            )
-            for row in comparison_rows
-        ]
-        if scored_results:
-            best_name, best_score = max(scored_results, key=lambda item: item[1])
-            st.success(f"\ud604\uc7ac \ud3c9\uac00\uc2dd \uae30\uc900 \ucd5c\uace0 \uc810\uc218: `{best_name}` `{best_score:.1f} / 100`")
+    previous_snapshot = st.session_state.previous_path_snapshot
+    if not has_current_path_result and previous_snapshot:
+        previous_result = previous_snapshot["result"]
+        previous_algorithm = previous_snapshot["algorithm_key"]
+        _, previous_algorithm_name, _ = PATH_ALGORITHMS[previous_algorithm]
+        previous_start_point = previous_snapshot.get("start_point")
+        previous_goal_point = previous_snapshot.get("goal_point")
+        previous_duration = previous_snapshot.get("duration")
+        st.info("현재 선택 중인 조건과 별개로, 바로 직전에 계산한 결과를 보관하고 있습니다.")
+        with st.expander("직전 계산 결과 보기", expanded=True):
+            st.write(f"알고리즘: `{previous_algorithm_name}`")
+            if previous_start_point is not None:
+                st.write(f"직전 {START_TEXT}: `{_format_coordinate(previous_start_point)}`")
+            if previous_goal_point is not None:
+                st.write(f"직전 {GOAL_TEXT}: `{_format_coordinate(previous_goal_point)}`")
+            st.write(f"경로 길이: `{_format_distance(previous_result.distance)}`")
+            st.write(f"최소 해빙 거리: `{_format_distance(previous_result.min_clearance)}`")
+            if previous_duration is not None:
+                st.write(f"계산 시간: `{previous_duration:.2f}`초")
+            previous_comparison = st.session_state.previous_comparison_snapshot
+            if previous_comparison and previous_comparison.get("results"):
+                st.caption(f"직전 비교 실행 결과 {len(previous_comparison['results'])}개를 함께 보관하고 있습니다.")
+            if st.button("직전 출발점/도착점 다시 불러오기", use_container_width=True):
+                _restore_previous_result_snapshot()
+                st.rerun()
 
-        if st.session_state.comparison_errors:
-            for error_message in st.session_state.comparison_errors.values():
-                st.warning(error_message)
-
-        with st.expander("\uc885\ud569 \uc810\uc218 \ud3c9\uac00 \uae30\uc900"):
-            st.write(
-                f"\ud604\uc7ac \uac00\uc911\uce58: \uc6b0\ud68c\uc728 `{score_weight_detour}`, \uc548\uc804\uc131 `{score_weight_safety}`, "
-                f"\uacc4\uc0b0 \uc2dc\uac04 `{score_weight_time}`, \ubc29\ubb38 \ub178\ub4dc `{score_weight_nodes}`, "
-                f"\uad74\uace1 \uc815\ub3c4 `{score_weight_turn}`"
-            )
-            st.write(
-                "\uc885\ud569 \uc810\uc218\ub294 \uc0ac\uc774\ub4dc\ubc14\uc5d0\uc11c \uc870\uc808\ud55c \uac00\uc911\uce58\ub97c \ube44\uc728\ub85c \uc815\uaddc\ud654\ud558\uc5ec "
-                "\uc6b0\ud68c\uc728, \uc548\uc804\uc131, \uacc4\uc0b0 \uc2dc\uac04, \ubc29\ubb38 \ub178\ub4dc \uc218, \uad74\uace1 \uc815\ub3c4\ub97c \ud568\uaed8 \ubc18\uc601\ud55c \uac12\uc774\ub2e4."
-            )
-            st.write(
-                "\uc774 \uc810\uc218\ub294 \uc54c\uace0\ub9ac\uc998\uc774 \uc548\uc804\uac70\ub9ac\ub97c \uc9c1\uc811 \ucd5c\uc801\ud654\ud588\ub2e4\ub294 \ub73b\uc774 \uc544\ub2c8\ub77c, "
-                "\uac19\uc740 \ud574\ube59 \ud658\uacbd\uc5d0\uc11c \uc0dd\uc131\ub41c \uacbd\ub85c\ub97c \ub3d9\uc77c\ud55c \uae30\uc900\uc73c\ub85c \uc0ac\ud6c4 \ud3c9\uac00\ud55c \uac12\uc774\ub2e4."
-            )
 
 
 

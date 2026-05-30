@@ -6,10 +6,12 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from geometry_utils import point_in_polygon, point_to_polygon_distance, segment_intersects_polygon
+from geometry_utils import point_in_polygon, polygon_bbox, point_to_polygon_distance, segment_intersects_polygon
 
 Point = Tuple[float, float]
 GridCell = Tuple[int, int]
+PolygonBBox = Tuple[float, float, float, float]
+PROGRESS_UPDATE_INTERVAL = 600
 
 
 @dataclass
@@ -73,6 +75,7 @@ def _is_blocked(
     cell_size: float,
     visible_polygons: List[np.ndarray],
     clearance: float,
+    polygon_bboxes: List[PolygonBBox],
 ) -> bool:
     """
     격자 칸 하나가 얼음에 막혀 있는지 검사한다.
@@ -96,7 +99,10 @@ def _is_blocked(
         if not (0.0 <= point[0] <= width and 0.0 <= point[1] <= height):
             return True
 
-        for polygon in visible_polygons:
+        for polygon, bbox in zip(visible_polygons, polygon_bboxes):
+            min_x, min_y, max_x, max_y = bbox
+            if point[0] < min_x or point[0] > max_x or point[1] < min_y or point[1] > max_y:
+                continue
             if point_in_polygon(point, polygon):
                 return True
 
@@ -115,14 +121,19 @@ def _build_open_mask(
     """
     cols, rows = _grid_shape(width, height, cell_size)
     open_mask = np.ones((rows, cols), dtype=bool)
+    polygon_bboxes = _build_polygon_bboxes(visible_polygons)
 
     for row in range(rows):
         for col in range(cols):
-            if _is_blocked((col, row), width, height, cell_size, visible_polygons, clearance):
+            if _is_blocked((col, row), width, height, cell_size, visible_polygons, clearance, polygon_bboxes):
                 open_mask[row, col] = False
 
     return open_mask
 
+
+
+def _build_polygon_bboxes(visible_polygons: List[np.ndarray]) -> List[PolygonBBox]:
+    return [polygon_bbox(polygon) for polygon in visible_polygons]
 
 def _find_nearest_open_cell(target: GridCell, open_mask: np.ndarray) -> Optional[GridCell]:
     """
@@ -172,11 +183,25 @@ def _segment_hits_any_polygon(
     start: Point,
     end: Point,
     visible_polygons: List[np.ndarray],
+    polygon_bboxes: Optional[List[PolygonBBox]] = None,
 ) -> bool:
     """
     선분이 얼음 다각형을 지나가는지 검사한다.
     """
-    for polygon in visible_polygons:
+    if polygon_bboxes is None:
+        polygon_bboxes = _build_polygon_bboxes(visible_polygons)
+
+    segment_bbox = (
+        min(start[0], end[0]),
+        min(start[1], end[1]),
+        max(start[0], end[0]),
+        max(start[1], end[1]),
+    )
+
+    for polygon, bbox in zip(visible_polygons, polygon_bboxes):
+        min_x, min_y, max_x, max_y = bbox
+        if segment_bbox[2] < min_x or max_x < segment_bbox[0] or segment_bbox[3] < min_y or max_y < segment_bbox[1]:
+            continue
         if segment_intersects_polygon(start, end, polygon):
             return True
     return False
@@ -298,8 +323,9 @@ def find_dijkstra_path(
     start_point: Point,
     goal_point: Point,
     visible_polygons: List[np.ndarray],
-    cell_size: float = 0.3,
+    cell_size: float = 0.5,
     progress_callback: Optional[Callable[[int], None]] = None,
+    open_mask: Optional[np.ndarray] = None,
 ) -> Optional[PathResult]:
     """
     다익스트라 알고리즘으로 출발점에서 도착점까지의 경로를 계산한다.
@@ -311,7 +337,9 @@ def find_dijkstra_path(
     4. 찾은 격자 경로를 실제 좌표 리스트로 바꿔서 반환한다.
     """
     clearance = cell_size * 0.42
-    open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    if open_mask is None:
+        open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    polygon_bboxes = _build_polygon_bboxes(visible_polygons)
 
     start_cell = _point_to_cell(start_point, width, height, cell_size)
     goal_cell = _point_to_cell(goal_point, width, height, cell_size)
@@ -366,7 +394,7 @@ def find_dijkstra_path(
 
         visited_nodes += 1
 
-        if progress_callback is not None and visited_nodes % 120 == 0:
+        if progress_callback is not None and visited_nodes % PROGRESS_UPDATE_INTERVAL == 0:
             progress_callback(visited_nodes)
 
         if current == goal_cell:
@@ -390,7 +418,7 @@ def find_dijkstra_path(
 
             current_center = _cell_center(current, width, height, cell_size)
             neighbor_center = _cell_center((next_col, next_row), width, height, cell_size)
-            if _segment_hits_any_polygon(current_center, neighbor_center, visible_polygons):
+            if _segment_hits_any_polygon(current_center, neighbor_center, visible_polygons, polygon_bboxes):
                 continue
 
             neighbor = (next_col, next_row)
@@ -405,12 +433,14 @@ def find_dijkstra_path(
         return None
 
     path_cells = _reconstruct_path(previous, start_cell, goal_cell)
+    if polygon_bboxes is None:
+        polygon_bboxes = _build_polygon_bboxes(visible_polygons)
 
     path_points: List[Point] = []
     start_center = _cell_center(start_cell, width, height, cell_size)
     goal_center = _cell_center(goal_cell, width, height, cell_size)
 
-    if not _segment_hits_any_polygon(start_point, start_center, visible_polygons):
+    if not _segment_hits_any_polygon(start_point, start_center, visible_polygons, polygon_bboxes):
         path_points.append(start_point)
     else:
         path_points.append(start_center)
@@ -420,7 +450,7 @@ def find_dijkstra_path(
         if not path_points or center != path_points[-1]:
             path_points.append(center)
 
-    if not _segment_hits_any_polygon(goal_center, goal_point, visible_polygons):
+    if not _segment_hits_any_polygon(goal_center, goal_point, visible_polygons, polygon_bboxes):
         if goal_point != path_points[-1]:
             path_points.append(goal_point)
 
@@ -479,6 +509,7 @@ def _cells_to_path_result(
     visible_polygons: List[np.ndarray],
     cell_size: float,
     visited_nodes: int,
+    polygon_bboxes: Optional[List[PolygonBBox]] = None,
 ) -> PathResult:
     path_cells = _reconstruct_path(previous, start_cell, goal_cell)
 
@@ -486,7 +517,7 @@ def _cells_to_path_result(
     start_center = _cell_center(start_cell, width, height, cell_size)
     goal_center = _cell_center(goal_cell, width, height, cell_size)
 
-    if not _segment_hits_any_polygon(start_point, start_center, visible_polygons):
+    if not _segment_hits_any_polygon(start_point, start_center, visible_polygons, polygon_bboxes):
         path_points.append(start_point)
     else:
         path_points.append(start_center)
@@ -496,7 +527,7 @@ def _cells_to_path_result(
         if not path_points or center != path_points[-1]:
             path_points.append(center)
 
-    if not _segment_hits_any_polygon(goal_center, goal_point, visible_polygons):
+    if not _segment_hits_any_polygon(goal_center, goal_point, visible_polygons, polygon_bboxes):
         if goal_point != path_points[-1]:
             path_points.append(goal_point)
 
@@ -547,6 +578,7 @@ def _can_step_between_cells(
     height: float,
     cell_size: float,
     visible_polygons: List[np.ndarray],
+    polygon_bboxes: Optional[List[PolygonBBox]] = None,
 ) -> bool:
     rows, cols = open_mask.shape
     next_col, next_row = next_cell
@@ -564,9 +596,11 @@ def _can_step_between_cells(
         if not open_mask[current_row, next_col] or not open_mask[next_row, current_col]:
             return False
 
+    if polygon_bboxes is None:
+        polygon_bboxes = _build_polygon_bboxes(visible_polygons)
     current_center = _cell_center(current, width, height, cell_size)
     next_center = _cell_center(next_cell, width, height, cell_size)
-    return not _segment_hits_any_polygon(current_center, next_center, visible_polygons)
+    return not _segment_hits_any_polygon(current_center, next_center, visible_polygons, polygon_bboxes)
 
 
 def _nearest_polygon_distance(
@@ -618,8 +652,9 @@ def find_safety_weighted_dijkstra_path(
     start_point: Point,
     goal_point: Point,
     visible_polygons: List[np.ndarray],
-    cell_size: float = 0.3,
+    cell_size: float = 0.5,
     progress_callback: Optional[Callable[[int], None]] = None,
+    open_mask: Optional[np.ndarray] = None,
     safety_radius: float = 1.0,
     penalty_strength: float = 8.0,
 ) -> Optional[PathResult]:
@@ -631,7 +666,9 @@ def find_safety_weighted_dijkstra_path(
     해빙과 여유 거리를 두는 경로를 우선 선택하도록 한다.
     """
     clearance = cell_size * 0.42
-    open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    if open_mask is None:
+        open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    polygon_bboxes = _build_polygon_bboxes(visible_polygons)
 
     start_cell = _find_nearest_open_cell(_point_to_cell(start_point, width, height, cell_size), open_mask)
     goal_cell = _find_nearest_open_cell(_point_to_cell(goal_point, width, height, cell_size), open_mask)
@@ -656,7 +693,7 @@ def find_safety_weighted_dijkstra_path(
 
         visited_nodes += 1
 
-        if progress_callback is not None and visited_nodes % 120 == 0:
+        if progress_callback is not None and visited_nodes % PROGRESS_UPDATE_INTERVAL == 0:
             progress_callback(visited_nodes)
 
         if current == goal_cell:
@@ -666,7 +703,7 @@ def find_safety_weighted_dijkstra_path(
         for delta_col, delta_row, step_cost in neighbor_steps:
             neighbor = (current_col + delta_col, current_row + delta_row)
             if not _can_step_between_cells(
-                current, neighbor, open_mask, width, height, cell_size, visible_polygons
+                current, neighbor, open_mask, width, height, cell_size, visible_polygons, polygon_bboxes
             ):
                 continue
 
@@ -712,11 +749,14 @@ def _has_line_of_sight_between_cells(
     height: float,
     cell_size: float,
     visible_polygons: List[np.ndarray],
+    polygon_bboxes: Optional[List[PolygonBBox]] = None,
 ) -> bool:
+    if polygon_bboxes is None:
+        polygon_bboxes = _build_polygon_bboxes(visible_polygons)
     start = _cell_center(start_cell, width, height, cell_size)
     end = _cell_center(end_cell, width, height, cell_size)
 
-    if _segment_hits_any_polygon(start, end, visible_polygons):
+    if _segment_hits_any_polygon(start, end, visible_polygons, polygon_bboxes):
         return False
 
     distance = math.hypot(end[0] - start[0], end[1] - start[1])
@@ -741,11 +781,14 @@ def find_astar_path(
     start_point: Point,
     goal_point: Point,
     visible_polygons: List[np.ndarray],
-    cell_size: float = 0.3,
+    cell_size: float = 0.5,
     progress_callback: Optional[Callable[[int], None]] = None,
+    open_mask: Optional[np.ndarray] = None,
 ) -> Optional[PathResult]:
     clearance = cell_size * 0.42
-    open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    if open_mask is None:
+        open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    polygon_bboxes = _build_polygon_bboxes(visible_polygons)
 
     start_cell = _find_nearest_open_cell(_point_to_cell(start_point, width, height, cell_size), open_mask)
     goal_cell = _find_nearest_open_cell(_point_to_cell(goal_point, width, height, cell_size), open_mask)
@@ -769,7 +812,7 @@ def find_astar_path(
 
         visited_nodes += 1
 
-        if progress_callback is not None and visited_nodes % 120 == 0:
+        if progress_callback is not None and visited_nodes % PROGRESS_UPDATE_INTERVAL == 0:
             progress_callback(visited_nodes)
 
         if current == goal_cell:
@@ -779,7 +822,7 @@ def find_astar_path(
         for delta_col, delta_row, step_cost in neighbor_steps:
             neighbor = (current_col + delta_col, current_row + delta_row)
             if not _can_step_between_cells(
-                current, neighbor, open_mask, width, height, cell_size, visible_polygons
+                current, neighbor, open_mask, width, height, cell_size, visible_polygons, polygon_bboxes
             ):
                 continue
 
@@ -813,11 +856,14 @@ def find_theta_star_path(
     start_point: Point,
     goal_point: Point,
     visible_polygons: List[np.ndarray],
-    cell_size: float = 0.3,
+    cell_size: float = 0.5,
     progress_callback: Optional[Callable[[int], None]] = None,
+    open_mask: Optional[np.ndarray] = None,
 ) -> Optional[PathResult]:
     clearance = cell_size * 0.42
-    open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    if open_mask is None:
+        open_mask = _build_open_mask(width, height, cell_size, visible_polygons, clearance)
+    polygon_bboxes = _build_polygon_bboxes(visible_polygons)
 
     start_cell = _find_nearest_open_cell(_point_to_cell(start_point, width, height, cell_size), open_mask)
     goal_cell = _find_nearest_open_cell(_point_to_cell(goal_point, width, height, cell_size), open_mask)
@@ -841,7 +887,7 @@ def find_theta_star_path(
 
         visited_nodes += 1
 
-        if progress_callback is not None and visited_nodes % 120 == 0:
+        if progress_callback is not None and visited_nodes % PROGRESS_UPDATE_INTERVAL == 0:
             progress_callback(visited_nodes)
 
         if current == goal_cell:
@@ -853,12 +899,12 @@ def find_theta_star_path(
         for delta_col, delta_row, step_cost in neighbor_steps:
             neighbor = (current_col + delta_col, current_row + delta_row)
             if not _can_step_between_cells(
-                current, neighbor, open_mask, width, height, cell_size, visible_polygons
+                current, neighbor, open_mask, width, height, cell_size, visible_polygons, polygon_bboxes
             ):
                 continue
 
             if _has_line_of_sight_between_cells(
-                current_parent, neighbor, open_mask, width, height, cell_size, visible_polygons
+                current_parent, neighbor, open_mask, width, height, cell_size, visible_polygons, polygon_bboxes
             ):
                 base_cell = current_parent
                 base_center = _cell_center(base_cell, width, height, cell_size)

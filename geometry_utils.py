@@ -359,6 +359,15 @@ def segment_intersects_polygon(start: Point, end: Point, polygon: np.ndarray) ->
     if len(polygon) < 3:
         return False
 
+    segment_bbox = (
+        min(start[0], end[0]),
+        min(start[1], end[1]),
+        max(start[0], end[0]),
+        max(start[1], end[1]),
+    )
+    if not bboxes_overlap(segment_bbox, polygon_bbox(polygon)):
+        return False
+
     if point_in_polygon(start, polygon) or point_in_polygon(end, polygon):
         return True
 
