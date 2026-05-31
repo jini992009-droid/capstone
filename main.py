@@ -1,7 +1,9 @@
+import base64
 import html
 import random
 import time
 from io import BytesIO
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -31,6 +33,9 @@ Point = Tuple[float, float]
 
 TITLE = "북극 해빙 환경에서 선박 항로 생성 및 알고리즘 비교 웹앱"
 CAPTION = "해빙 환경을 생성하고, 바다 위를 클릭해 선박의 출발점과 도착점을 지정한 뒤, 경로 탐색 알고리즘별 결과를 비교할 수 있습니다."
+LOGO_PATH = "assets/kmou_ocean_engineering_logo.png"
+STREAMLIT_URL = "https://capstone-djppq74gfrafbwsc6dpkub.streamlit.app/"
+GITHUB_URL = "https://github.com/jini992009-droid/capstone.git"
 START_TEXT = "\ucd9c\ubc1c\uc810"
 GOAL_TEXT = "\ub3c4\ucc29\uc810"
 PATH_CELL_SIZE = 0.5
@@ -54,6 +59,18 @@ PATH_ALGORITHMS = {
     "astar": ("A* Algorithm 실행", "A* Algorithm", find_astar_path),
     "theta_star": ("Theta* Algorithm 실행", "Theta* Algorithm", find_theta_star_path),
 }
+
+
+def _image_to_data_uri(path: str) -> str:
+    image_path = Path(path)
+    if not image_path.exists():
+        return ""
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    suffix = image_path.suffix.lower().lstrip(".") or "png"
+    if suffix == "jpg":
+        suffix = "jpeg"
+    return f"data:image/{suffix};base64,{encoded}"
+
 
 def _units_to_meters(value: float) -> float:
     return float(value) * METERS_PER_UNIT
@@ -245,6 +262,223 @@ def _inject_ppt_theme() -> None:
             color: #61758e;
             font-size: 0.98rem;
             margin: 0;
+        }
+        [data-testid="stSidebar"] [data-testid="stImage"] img {
+            box-sizing: border-box;
+            width: 100% !important;
+            object-fit: contain;
+            padding: 0.68rem 0.82rem;
+            background: rgba(255, 255, 255, 0.72);
+            border-radius: 18px;
+        }
+        .asv-sidebar-card-heading {
+            color: var(--ppt-navy);
+            font-size: 1.08rem;
+            font-weight: 800;
+            line-height: 1.35;
+            margin: 0.1rem 0 0.28rem;
+        }
+        .asv-sidebar-card-subtitle {
+            color: var(--ppt-muted);
+            font-size: 0.82rem;
+            line-height: 1.45;
+            margin: 0 0 0.7rem;
+        }
+        .asv-sidebar-project-card {
+            margin-top: 1.1rem;
+            padding: 1rem 1rem 1.05rem;
+            border: 1px solid #cfe5f2;
+            border-radius: 20px;
+            background:
+                radial-gradient(circle at 88% 8%, rgba(75, 136, 255, 0.12), transparent 34%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(243, 250, 255, 0.92) 100%);
+            box-shadow: 0 10px 26px rgba(31, 58, 99, 0.08);
+        }
+        .asv-sidebar-project-kicker {
+            color: var(--ppt-blue);
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.45rem;
+        }
+        .asv-sidebar-project-title {
+            color: var(--ppt-navy);
+            font-size: 1.02rem;
+            font-weight: 780;
+            line-height: 1.35;
+            margin-bottom: 0.65rem;
+        }
+        .asv-sidebar-project-meta {
+            display: grid;
+            gap: 0.32rem;
+            color: var(--ppt-text);
+            font-size: 0.86rem;
+            line-height: 1.45;
+        }
+        .asv-sidebar-project-meta span {
+            color: var(--ppt-muted);
+            font-weight: 650;
+            margin-right: 0.35rem;
+        }
+        .asv-sidebar-links {
+            display: flex;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+            margin-top: 0.85rem;
+        }
+        .asv-sidebar-links a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.34rem 0.62rem;
+            border-radius: 999px;
+            border: 1px solid var(--ppt-blue-mid);
+            color: var(--ppt-navy) !important;
+            background: rgba(255, 255, 255, 0.78);
+            font-size: 0.78rem;
+            font-weight: 720;
+            text-decoration: none !important;
+        }
+        .asv-sidebar-card-logo {
+            margin-top: 0.9rem;
+            padding: 0.64rem 0.72rem;
+            border: 1px solid rgba(207, 229, 242, 0.92);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.78);
+        }
+        .asv-sidebar-card-logo img {
+            display: block;
+            width: 100%;
+            height: auto;
+            object-fit: contain;
+        }
+        .asv-sidebar-links a:hover {
+            color: var(--ppt-blue) !important;
+            border-color: var(--ppt-blue);
+            background: #ffffff;
+        }
+        .asv-reference-section {
+            margin-top: 1.6rem;
+            padding: 1.25rem 1.35rem 1.35rem;
+            border: 1px solid #cfe5f2;
+            border-radius: 24px;
+            background:
+                radial-gradient(circle at 92% 12%, rgba(112, 197, 231, 0.18), transparent 28%),
+                linear-gradient(135deg, #ffffff 0%, #f6fbff 54%, #edf8ff 100%);
+            box-shadow: 0 14px 34px rgba(31, 58, 99, 0.09);
+        }
+        .asv-reference-kicker {
+            color: var(--ppt-blue);
+            font-size: 0.76rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.35rem;
+        }
+        .asv-reference-section h2 {
+            margin: 0 0 0.35rem !important;
+            color: var(--ppt-navy) !important;
+            font-size: 1.45rem !important;
+            line-height: 1.3 !important;
+        }
+        .asv-reference-details {
+            display: grid;
+            gap: 0.72rem;
+            margin-top: 1rem;
+        }
+        .asv-reference-details details {
+            border: 1px solid var(--ppt-border);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.86);
+            overflow: hidden;
+        }
+        .asv-reference-details summary {
+            cursor: pointer;
+            padding: 0.92rem 1rem;
+            color: var(--ppt-navy);
+            font-weight: 780;
+            list-style-position: inside;
+        }
+        .asv-reference-details summary::marker {
+            color: var(--ppt-blue);
+        }
+        .asv-reference-detail-body {
+            padding: 0 1rem 0.95rem 1.35rem;
+            color: var(--ppt-text);
+            font-size: 0.92rem;
+            line-height: 1.62;
+        }
+        .asv-reference-detail-body p {
+            margin: 0.32rem 0;
+        }
+        .asv-reference-detail-body ul {
+            margin: 0.2rem 0 0;
+            padding-left: 1.1rem;
+        }
+        .asv-reference-detail-body li {
+            margin: 0.24rem 0;
+        }
+        .asv-reference-detail-body code {
+            color: #087a3e;
+            background: #f4fbf7;
+            border-radius: 6px;
+            padding: 0.06rem 0.22rem;
+        }
+        .asv-reference-detail-body a {
+            color: var(--ppt-blue) !important;
+            font-weight: 720;
+            text-decoration: none !important;
+        }
+        .asv-reference-detail-body a:hover {
+            text-decoration: underline !important;
+        }
+        .asv-reference-caption {
+            color: var(--ppt-muted);
+            margin-bottom: 1.05rem;
+            line-height: 1.55;
+        }
+        .asv-reference-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.9rem;
+        }
+        .asv-reference-card {
+            border: 1px solid var(--ppt-border);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.84);
+            padding: 0.95rem 1rem;
+        }
+        .asv-reference-card h3 {
+            margin: 0 0 0.55rem !important;
+            color: var(--ppt-navy) !important;
+            font-size: 1rem !important;
+            line-height: 1.35 !important;
+        }
+        .asv-reference-card p, .asv-reference-card li {
+            color: var(--ppt-text);
+            font-size: 0.91rem;
+            line-height: 1.58;
+            margin: 0.28rem 0;
+        }
+        .asv-reference-card ul {
+            margin: 0;
+            padding-left: 1.1rem;
+        }
+        .asv-reference-card code {
+            color: #087a3e;
+            background: #f4fbf7;
+            border-radius: 6px;
+            padding: 0.06rem 0.22rem;
+        }
+        .asv-reference-card a {
+            color: var(--ppt-blue) !important;
+            font-weight: 720;
+            text-decoration: none !important;
+        }
+        .asv-reference-card a:hover { text-decoration: underline !important; }
+        @media (max-width: 1100px) {
+            .asv-reference-grid { grid-template-columns: 1fr; }
         }
         </style>
         """,
@@ -840,108 +1074,145 @@ st.markdown(
 path_timer_placeholder = st.empty()
 
 with st.sidebar:
-    st.header("환경 설정")
-
-    seed = st.number_input("해빙 랜덤 배치", min_value=0, value=42, step=1)
-
-    with st.expander("해빙 세부 설정", expanded=False):
-        ice_count = st.slider("얼음 개수", min_value=20, max_value=220, value=85, step=5)
-        min_diameter_m = st.slider("최소 직경 (m)", min_value=40, max_value=300, value=80, step=10)
-        max_diameter_m = st.slider("최대 직경 (m)", min_value=80, max_value=500, value=180, step=10)
-        min_vertices = st.slider(
-            "최소 꼭짓점 수", min_value=6, max_value=12, value=8, step=1
-        )
-        max_vertices = st.slider(
-            "최대 꼭짓점 수", min_value=8, max_value=24, value=14, step=1
-        )
-        min_gap_m = st.slider("최소 간격 (m)", min_value=0, max_value=150, value=10, step=5)
-        show_grid = st.checkbox("격자 표시", value=False, help="체크하면 30×30 격자를 표시합니다.")
-
-    min_diameter = _meters_to_units(min_diameter_m)
-    max_diameter = _meters_to_units(max_diameter_m)
-    edge_margin = DEFAULT_EDGE_MARGIN
-    min_gap = _meters_to_units(min_gap_m)
-    outline_width = DEFAULT_OUTLINE_WIDTH
-
-    with st.expander("선박 안전 반경 설정", expanded=False):
-        ship_safety_radius_m = st.slider(
-            "선박 안전 반경 (m)",
-            min_value=10,
-            max_value=200,
-            value=100,
-            step=10,
-        )
-        risk_threshold_m = int(round(ship_safety_radius_m * 0.5))
-        st.caption(
-            f"최소 해빙 거리가 `{risk_threshold_m} m` 미만이면 `위험`, "
-            f"`{risk_threshold_m}~{ship_safety_radius_m} m` 구간이면 `주의`, "
-            f"`{ship_safety_radius_m} m` 이상이면 `안전`으로 평가합니다."
-        )
-        st.markdown(_render_safety_radius_preview_card(ship_safety_radius_m), unsafe_allow_html=True)
-    ship_safety_radius = _meters_to_units(ship_safety_radius_m)
-
-    with st.expander("평가 가중치 설정", expanded=False):
-        preset_cols = st.columns(3)
-        for column, preset_name in zip(preset_cols, ("안전 중심", "속도 중심", "균형")):
-            button_type = "primary" if st.session_state.weight_preset == preset_name else "secondary"
-            if column.button(preset_name, key=f"weight_preset_button_{preset_name}", type=button_type, use_container_width=True):
-                preset_values = WEIGHT_PRESETS[preset_name]
-                st.session_state.score_weight_detour = preset_values["detour"]
-                st.session_state.score_weight_safety = preset_values["safety"]
-                st.session_state.score_weight_time = preset_values["time"]
-                st.session_state.score_weight_nodes = preset_values["nodes"]
-                st.session_state.score_weight_turn = preset_values["turn"]
-                st.session_state.weight_preset = preset_name
-                st.rerun()
-
-        score_weight_detour = st.slider("우회율 가중치", min_value=0, max_value=50, step=5, key="score_weight_detour")
-        score_weight_safety = st.slider("안전성 가중치", min_value=0, max_value=50, step=5, key="score_weight_safety")
-        score_weight_time = st.slider("계산 시간 가중치", min_value=0, max_value=50, step=5, key="score_weight_time")
-        score_weight_nodes = st.slider("방문 노드 가중치", min_value=0, max_value=50, step=5, key="score_weight_nodes")
-        score_weight_turn = st.slider("굴곡 정도 가중치", min_value=0, max_value=50, step=5, key="score_weight_turn")
-        matched_preset = next((
-            name
-            for name, values in WEIGHT_PRESETS.items()
-            if values["detour"] == score_weight_detour
-            and values["safety"] == score_weight_safety
-            and values["time"] == score_weight_time
-            and values["nodes"] == score_weight_nodes
-            and values["turn"] == score_weight_turn
-        ), None)
-        st.session_state.weight_preset = matched_preset or "사용자 설정"
-        st.caption("종합 점수는 위 가중치의 비율로 자동 정규화해 계산합니다.")
+    with st.container(border=True):
         st.markdown(
-            _render_weight_preview_card(
-                detour_weight=score_weight_detour,
-                safety_weight=score_weight_safety,
-                time_weight=score_weight_time,
-                nodes_weight=score_weight_nodes,
-                turn_weight=score_weight_turn,
-            ),
+            """
+            <div class="asv-sidebar-card-heading">환경 설정</div>
+            <div class="asv-sidebar-card-subtitle">해빙 환경과 경로 평가 기준을 조정합니다.</div>
+            """,
             unsafe_allow_html=True,
         )
-    score_weights = {
-        "detour": float(score_weight_detour),
-        "safety": float(score_weight_safety),
-        "time": float(score_weight_time),
-        "nodes": float(score_weight_nodes),
-        "turn": float(score_weight_turn),
-    }
+        seed = st.number_input("해빙 랜덤 배치", min_value=0, value=42, step=1)
+        with st.expander("해빙 세부 설정", expanded=False):
+            ice_count = st.slider("얼음 개수", min_value=20, max_value=220, value=85, step=5)
+            min_diameter_m = st.slider("최소 직경 (m)", min_value=40, max_value=300, value=80, step=10)
+            max_diameter_m = st.slider("최대 직경 (m)", min_value=80, max_value=500, value=180, step=10)
+            min_vertices = st.slider(
+                "최소 꼭짓점 수", min_value=6, max_value=12, value=8, step=1
+            )
+            max_vertices = st.slider(
+                "최대 꼭짓점 수", min_value=8, max_value=24, value=14, step=1
+            )
+            min_gap_m = st.slider("최소 간격 (m)", min_value=0, max_value=150, value=10, step=5)
+            show_grid = st.checkbox("격자 표시", value=False, help="체크하면 30×30 격자를 표시합니다.")
 
-    st.header("출발점/도착점 지정")
-    st.radio(
-        "지금 클릭해서 지정할 점",
-        (START_TEXT, GOAL_TEXT),
-        key="selection_target_widget",
+        min_diameter = _meters_to_units(min_diameter_m)
+        max_diameter = _meters_to_units(max_diameter_m)
+        edge_margin = DEFAULT_EDGE_MARGIN
+        min_gap = _meters_to_units(min_gap_m)
+        outline_width = DEFAULT_OUTLINE_WIDTH
+
+        with st.expander("선박 안전 반경 설정", expanded=False):
+            ship_safety_radius_m = st.slider(
+                "선박 안전 반경 (m)",
+                min_value=10,
+                max_value=200,
+                value=100,
+                step=10,
+            )
+            risk_threshold_m = int(round(ship_safety_radius_m * 0.5))
+            st.caption(
+                f"최소 해빙 거리가 `{risk_threshold_m} m` 미만이면 `위험`, "
+                f"`{risk_threshold_m}~{ship_safety_radius_m} m` 구간이면 `주의`, "
+                f"`{ship_safety_radius_m} m` 이상이면 `안전`으로 평가합니다."
+            )
+            st.markdown(_render_safety_radius_preview_card(ship_safety_radius_m), unsafe_allow_html=True)
+        ship_safety_radius = _meters_to_units(ship_safety_radius_m)
+
+        with st.expander("평가 가중치 설정", expanded=False):
+            preset_cols = st.columns(3)
+            for column, preset_name in zip(preset_cols, ("안전 중심", "속도 중심", "균형")):
+                button_type = "primary" if st.session_state.weight_preset == preset_name else "secondary"
+                if column.button(preset_name, key=f"weight_preset_button_{preset_name}", type=button_type, use_container_width=True):
+                    preset_values = WEIGHT_PRESETS[preset_name]
+                    st.session_state.score_weight_detour = preset_values["detour"]
+                    st.session_state.score_weight_safety = preset_values["safety"]
+                    st.session_state.score_weight_time = preset_values["time"]
+                    st.session_state.score_weight_nodes = preset_values["nodes"]
+                    st.session_state.score_weight_turn = preset_values["turn"]
+                    st.session_state.weight_preset = preset_name
+                    st.rerun()
+
+            score_weight_detour = st.slider("우회율 가중치", min_value=0, max_value=50, step=5, key="score_weight_detour")
+            score_weight_safety = st.slider("안전성 가중치", min_value=0, max_value=50, step=5, key="score_weight_safety")
+            score_weight_time = st.slider("계산 시간 가중치", min_value=0, max_value=50, step=5, key="score_weight_time")
+            score_weight_nodes = st.slider("방문 노드 가중치", min_value=0, max_value=50, step=5, key="score_weight_nodes")
+            score_weight_turn = st.slider("굴곡 정도 가중치", min_value=0, max_value=50, step=5, key="score_weight_turn")
+            matched_preset = next((
+                name
+                for name, values in WEIGHT_PRESETS.items()
+                if values["detour"] == score_weight_detour
+                and values["safety"] == score_weight_safety
+                and values["time"] == score_weight_time
+                and values["nodes"] == score_weight_nodes
+                and values["turn"] == score_weight_turn
+            ), None)
+            st.session_state.weight_preset = matched_preset or "사용자 설정"
+            st.caption("종합 점수는 위 가중치의 비율로 자동 정규화해 계산합니다.")
+            st.markdown(
+                _render_weight_preview_card(
+                    detour_weight=score_weight_detour,
+                    safety_weight=score_weight_safety,
+                    time_weight=score_weight_time,
+                    nodes_weight=score_weight_nodes,
+                    turn_weight=score_weight_turn,
+                ),
+                unsafe_allow_html=True,
+            )
+        score_weights = {
+            "detour": float(score_weight_detour),
+            "safety": float(score_weight_safety),
+            "time": float(score_weight_time),
+            "nodes": float(score_weight_nodes),
+            "turn": float(score_weight_turn),
+        }
+
+    with st.container(border=True):
+        st.markdown(
+            """
+            <div class="asv-sidebar-card-heading">출발점/도착점 지정</div>
+            <div class="asv-sidebar-card-subtitle">지도에서 클릭할 지점 유형을 선택합니다.</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.radio(
+            "지금 클릭해서 지정할 점",
+            (START_TEXT, GOAL_TEXT),
+            key="selection_target_widget",
+        )
+        st.session_state.selection_target = st.session_state.selection_target_widget
+
+        if st.button("초기화", use_container_width=True):
+            _clear_points()
+            st.rerun()
+
+        st.caption("지도 이미지를 직접 클릭하세요")
+
+    logo_data_uri = _image_to_data_uri(LOGO_PATH)
+    logo_markup = (
+        f'<div class="asv-sidebar-card-logo"><img src="{logo_data_uri}" alt="국립한국해양대학교 해양공학과 로고"></div>'
+        if logo_data_uri
+        else ""
     )
-    st.session_state.selection_target = st.session_state.selection_target_widget
-
-    if st.button("초기화", use_container_width=True):
-        _clear_points()
-        st.rerun()
-
-    st.caption("지도 이미지를 직접 클릭하세요")
-
+    st.markdown(
+        f"""
+        <div class="asv-sidebar-project-card">
+            <div class="asv-sidebar-project-kicker">Project Information</div>
+            <div class="asv-sidebar-project-title">Capstone Design 2026</div>
+            <div class="asv-sidebar-project-meta">
+                <div><span>소속</span>국립한국해양대학교 해양공학과</div>
+                <div><span>제작자</span>이영진</div>
+                <div><span>지도교수</span>최원석 교수님</div>
+            </div>
+            <div class="asv-sidebar-links">
+                <a href="{STREAMLIT_URL}" target="_blank">Streamlit</a>
+                <a href="{GITHUB_URL}" target="_blank">GitHub</a>
+            </div>
+            {logo_markup}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 random.seed(int(seed))
 np.random.seed(int(seed))
@@ -1579,11 +1850,51 @@ with right_col:
                 _restore_previous_result_snapshot()
                 st.rerun()
 
-
-
-
-
-
-
-
-
+st.markdown(
+    f"""
+    <section class="asv-reference-section">
+        <div class="asv-reference-kicker">Data Sources & Calculation Basis</div>
+        <h2>자료 및 계산 근거</h2>
+        <div class="asv-reference-caption">
+            본 웹앱에서 사용한 시뮬레이션 환경, 알고리즘 출처, 안전거리 가중식, 프로젝트 정보를 정리한 영역입니다.
+        </div>
+        <div class="asv-reference-details">
+            <details>
+                <summary>데이터 및 시뮬레이션 환경</summary>
+                <div class="asv-reference-detail-body">
+                    <p>본 웹앱의 해빙 환경은 실제 관측자료가 아닌, 북극 해빙 해역을 단순화한 2D 시뮬레이션 환경으로 생성되었습니다.</p>
+                    <p>해빙 생성 초기 구현 과정에서 <a href="https://github.com/IvanIZ/predictive-asv-planner" target="_blank">IvanIZ/predictive-asv-planner</a>의 환경 생성 방식을 참고했습니다.</p>
+                </div>
+            </details>
+            <details>
+                <summary>경로 탐색 알고리즘 출처</summary>
+                <div class="asv-reference-detail-body">
+                    <ul>
+                        <li>Dijkstra Algorithm: Edsger W. Dijkstra, 1959</li>
+                        <li>A* Algorithm: Peter E. Hart, Nils J. Nilsson, Bertram Raphael, 1968</li>
+                        <li>Theta* Algorithm: Alex Nash, Kenny Daniel, Sven Koenig, Ariel Felner, 2007</li>
+                    </ul>
+                </div>
+            </details>
+            <details>
+                <summary>Safety-Weighted Dijkstra 계산식</summary>
+                <div class="asv-reference-detail-body">
+                    <p>Safety-Weighted Dijkstra는 기존 Dijkstra의 이동 비용에 해빙과의 거리 기반 안전 가중치를 곱하도록 직접 설계한 개선식입니다.</p>
+                    <p><code>cost = distance × w(d_ice)</code>, <code>w(d_ice) = 1 + αλ</code></p>
+                    <p><code>λ = ((3R - d_ice) / 3R)^2</code>이며, <code>d_ice ≥ 3R</code>인 경우에는 안전 가중치를 적용하지 않습니다.</p>
+                    <p><code>d_ice &lt; 0.5R</code> 구간은 해빙과 매우 가까운 고위험 구간으로 보고 추가 비용을 부여합니다.</p>
+                </div>
+            </details>
+            <details>
+                <summary>평가 지표 및 제작 정보</summary>
+                <div class="asv-reference-detail-body">
+                    <p>경로 길이, 계산 시간, 방문 노드 수, 우회율, 굴곡 횟수, 최소 해빙 거리, 위험 표시 지점 수를 기준으로 알고리즘 결과를 비교합니다.</p>
+                    <p>제작자: 이영진 · 국립한국해양대학교 해양공학과 · 지도교수: 최원석 교수님 · Capstone Design 2026</p>
+                    <p><a href="{STREAMLIT_URL}" target="_blank">Streamlit 웹앱</a> · <a href="{GITHUB_URL}" target="_blank">GitHub 저장소</a></p>
+                </div>
+            </details>
+        </div>
+    </section>
+    """,
+    unsafe_allow_html=True,
+)
